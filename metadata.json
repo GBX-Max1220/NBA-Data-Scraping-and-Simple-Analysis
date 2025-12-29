@@ -1,0 +1,7 @@
+{
+  "name": "CourtVision AI Agent",
+  "description": "An autonomous data harvesting and professional sports analytics platform powered by Gemini 3. Features self-healing scrapers, multi-step reasoning for complex NBA databases, and real-time metric calculation (TS%, PER, EFG%).",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
