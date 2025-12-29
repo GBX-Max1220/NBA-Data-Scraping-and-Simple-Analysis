@@ -2,19 +2,22 @@
 export enum AgentStatus {
   IDLE = 'IDLE',
   RUNNING = 'RUNNING',
-  HEALING = 'HEALING',
-  COMPLETED = 'COMPLETED',
   ERROR = 'ERROR'
 }
 
 export type AnalysisMode = 'RANKING' | 'TREND' | 'COMPARISON';
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+  timestamp: number;
+}
 
 export interface AgentStep {
   id: string;
   timestamp: number;
   type: 'reasoning' | 'action' | 'healing' | 'output';
   message: string;
-  details?: any;
 }
 
 export interface PlayerStats {
@@ -24,17 +27,7 @@ export interface PlayerStats {
   pts: number;
   reb: number;
   ast: number;
-  stl?: number;
-  blk?: number;
-  fga: number;
-  fgm: number;
-  fta: number;
-  ftm: number;
-  tpa: number;
-  tpm: number;
-  turnovers: number;
-  minutes: number;
-  date?: string; // For trend data
+  date?: string;
   advanced?: {
     ts_pct: number;
     efg_pct: number;
@@ -45,12 +38,8 @@ export interface PlayerStats {
 export interface AnalysisResponse {
   mode: AnalysisMode;
   summary: string;
-  data: PlayerStats[];
-}
-
-export interface ScraperConfig {
-  target: 'NBA_DOT_COM' | 'BASKETBALL_REF';
-  depth: number;
-  autoHeal: boolean;
+  queryType: 'PLAYER' | 'TEAM' | 'GAME';
   metrics: string[];
+  timeRange: string;
+  data: PlayerStats[];
 }

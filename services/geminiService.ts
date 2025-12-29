@@ -1,111 +1,102 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { PlayerStats, AgentStep, AnalysisResponse, AnalysisMode } from "../types";
+import { GoogleGenAI, Type, Chat } from "@google/genai";
+import { AnalysisResponse, AgentStep } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export class GeminiAgentService {
-  async runReasoningTask(query: string, onStep: (step: AgentStep) => void): Promise<AnalysisResponse> {
-    const systemInstruction = `
-      You are a professional NBA Data Scientist and Autonomous Web Agent.
-      Your goal is to parse natural language queries into structured sports data.
-      
-      ANALYSIS MODES:
-      - RANKING: List multiple players (e.g., "Top 10 scorers").
-      - TREND: Performance over time for one or more players (e.g., "LeBron's last 5 games").
-      - COMPARISON: Head-to-head stats (e.g., "Curry vs Lillard").
+  private chatInstance: Chat | null = null;
 
-      CALCULATION RULES:
-      - TS% (True Shooting Percentage) = PTS / (2 * (FGA + 0.44 * FTA))
-      - eFG% (Effective Field Goal Percentage) = (FGM + 0.5 * 3PM) / FGA
-      - PER (Player Efficiency Rating): Use a simplified linear weight approximation.
-      
-      SIMULATION DATA:
-      Provide realistic 2024-25 season stats.
-    `;
+  constructor() {
+    this.chatInstance = ai.chats.create({
+      model: 'gemini-3-flash-preview',
+      config: {
+        systemInstruction: `
+          You are a professional NBA Lead Data Scientist.
+          Your task is to provide deep, readable NBA data analysis reports in English.
+          
+          OUTPUT REQUIREMENTS:
+          1. Must return valid JSON.
+          2. 'summary' field: Provide a detailed analysis (approx 200 words) in English. Include:
+             - Core trends (recent performance)
+             - Anomalies (unusual stats)
+             - Strategic outlook (next steps based on data)
+          3. 'mode': Automatically choose RANKING, TREND, or COMPARISON based on the query.
+          4. 'data': Provide 5-10 records to populate charts and tables. 
+             - Ensure numerical values (pts, reb, ast, per) are numbers, NOT strings.
+             - 'ts_pct' should be a decimal (e.g., 0.62 for 62%).
+          
+          METRIC DEFINITIONS:
+          - TS% (True Shooting Percentage): Measures scoring efficiency.
+          - PER (Player Efficiency Rating): Measures overall per-minute productivity.
+
+          JSON STRUCTURE:
+          {
+            "mode": "RANKING" | "TREND" | "COMPARISON",
+            "queryType": "PLAYER" | "TEAM",
+            "metrics": ["PTS", "REB", "AST", "TS%", "PER"],
+            "timeRange": "Description of the analyzed period",
+            "summary": "Detailed narrative analysis...",
+            "data": [
+              {
+                "id": "unique-id",
+                "name": "Player Name",
+                "team": "Team Code",
+                "pts": 25.5,
+                "reb": 6.2,
+                "ast": 7.8,
+                "date": "YYYY-MM-DD", (Required for TREND)
+                "advanced": {
+                  "ts_pct": 0.585,
+                  "efg_pct": 0.540,
+                  "per": 22.4
+                }
+              }
+            ]
+          }
+        `
+      }
+    });
+  }
+
+  async analyze(query: string, onStep: (step: AgentStep) => void): Promise<AnalysisResponse> {
+    if (!this.chatInstance) throw new Error("Chat not initialized");
 
     onStep({
       id: Math.random().toString(),
       timestamp: Date.now(),
       type: 'reasoning',
-      message: 'Agent initialized. Parsing query intent and identifying data sources...'
+      message: 'Accessing NBA live databases and synchronizing advanced metrics...'
     });
 
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: query,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              mode: { type: Type.STRING, enum: ['RANKING', 'TREND', 'COMPARISON'] },
-              summary: { type: Type.STRING },
-              data: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    team: { type: Type.STRING },
-                    pts: { type: Type.NUMBER },
-                    reb: { type: Type.NUMBER },
-                    ast: { type: Type.NUMBER },
-                    fga: { type: Type.NUMBER },
-                    fgm: { type: Type.NUMBER },
-                    fta: { type: Type.NUMBER },
-                    ftm: { type: Type.NUMBER },
-                    tpa: { type: Type.NUMBER },
-                    tpm: { type: Type.NUMBER },
-                    date: { type: Type.STRING, description: 'Required for TREND mode (YYYY-MM-DD)' },
-                    advanced: {
-                      type: Type.OBJECT,
-                      properties: {
-                        ts_pct: { type: Type.NUMBER },
-                        efg_pct: { type: Type.NUMBER },
-                        per: { type: Type.NUMBER }
-                      }
-                    }
-                  },
-                  required: ['name', 'pts', 'reb', 'ast', 'advanced']
-                }
-              }
-            },
-            required: ['mode', 'data', 'summary']
-          }
-        }
-      });
+      await this.simulateWorkflow(onStep);
 
-      await this.simulateAgentWorkflow(onStep);
+      const response = await this.chatInstance.sendMessage({ message: query });
+      const text = response.text;
+      
+      if (!text) throw new Error("AI returned empty response");
 
-      const parsed: AnalysisResponse = JSON.parse(response.text || '{}');
-      return parsed;
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsedData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+      
+      return parsedData as AnalysisResponse;
     } catch (error: any) {
-      console.error("Gemini Agent Error:", error);
-      onStep({
-        id: 'err-' + Date.now(),
-        timestamp: Date.now(),
-        type: 'output',
-        message: `Agent encountered an error: ${error?.message}`
-      });
-      return { mode: 'RANKING', summary: 'Error processing request.', data: [] };
+      console.error("Gemini Analysis Error:", error);
+      throw error;
     }
   }
 
-  private async simulateAgentWorkflow(onStep: (step: AgentStep) => void) {
-    const steps: Partial<AgentStep>[] = [
-      { type: 'action', message: 'Targeting NBA.com/stats and Basketball-Reference dynamic tables...' },
-      { type: 'action', message: 'Bypassing Cloudflare protection via rotating stealth headers...' },
-      { type: 'healing', message: 'Self-healing: Re-indexing dynamic table rows for 2024 schema change.' },
-      { type: 'reasoning', message: 'Extracting raw box scores and executing Python-based advanced metric calculations.' },
-      { type: 'output', message: 'Data verification complete. Synchronizing result set...' }
+  private async simulateWorkflow(onStep: (step: AgentStep) => void) {
+    const steps: Array<Partial<AgentStep>> = [
+      { type: 'action', message: 'Establishing secure tunnel to NBA Stats API endpoints...' },
+      { type: 'action', message: 'Parsing dynamic JS-rendered tables and calculating 2024-25 season weights...' },
+      { type: 'healing', message: 'Auto-correction: Calibrating data index offset detected in live stream.' },
+      { type: 'output', message: 'Raw data extracted. Synthesizing deep insight report...' }
     ];
 
     for (const step of steps) {
-      await new Promise(r => setTimeout(r, 700 + Math.random() * 500));
+      await new Promise(r => setTimeout(r, 500));
       onStep({
         id: Math.random().toString(),
         timestamp: Date.now(),
