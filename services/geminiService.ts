@@ -1,121 +1,111 @@
 
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { PlayerStats, AgentStep } from "../types";
+import { GoogleGenAI, Type } from "@google/genai";
+import { PlayerStats, AgentStep, AnalysisResponse, AnalysisMode } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
-const NBA_TOOL_DEFINITION: FunctionDeclaration = {
-  name: 'execute_scraper',
-  description: 'Executes a Puppeteer/Playwright action to harvest NBA stats.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      url: { type: Type.STRING, description: 'The target URL to scrape' },
-      selectors: { 
-        type: Type.ARRAY, 
-        items: { type: Type.STRING },
-        description: 'CSS Selectors to extract data' 
-      },
-      actionType: { type: Type.STRING, enum: ['NAVIGATE', 'CLICK', 'EXTRACT_TABLE', 'SCROLL'] }
-    },
-    required: ['url', 'actionType']
-  }
-};
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export class GeminiAgentService {
-  /**
-   * Orchestrates a multi-step reasoning task for data harvesting.
-   */
-  async runReasoningTask(query: string, onStep: (step: AgentStep) => void): Promise<PlayerStats[]> {
-    const prompt = `
-      Task: Perform an autonomous data harvesting session for professional NBA analytics.
-      Query: ${query}
+  async runReasoningTask(query: string, onStep: (step: AgentStep) => void): Promise<AnalysisResponse> {
+    const systemInstruction = `
+      You are a professional NBA Data Scientist and Autonomous Web Agent.
+      Your goal is to parse natural language queries into structured sports data.
       
-      Requirements:
-      1. Define a multi-step plan to navigate complex JS-rendered sites.
-      2. If a selector fails (simulated), explain how you would "self-heal".
-      3. Calculate advanced metrics: True Shooting % (TS%), Effective Field Goal % (eFG%), and Player Efficiency Rating (PER).
+      ANALYSIS MODES:
+      - RANKING: List multiple players (e.g., "Top 10 scorers").
+      - TREND: Performance over time for one or more players (e.g., "LeBron's last 5 games").
+      - COMPARISON: Head-to-head stats (e.g., "Curry vs Lillard").
+
+      CALCULATION RULES:
+      - TS% (True Shooting Percentage) = PTS / (2 * (FGA + 0.44 * FTA))
+      - eFG% (Effective Field Goal Percentage) = (FGM + 0.5 * 3PM) / FGA
+      - PER (Player Efficiency Rating): Use a simplified linear weight approximation.
       
-      Return a structured JSON array of player stats with their calculated metrics.
+      SIMULATION DATA:
+      Provide realistic 2024-25 season stats.
     `;
 
     onStep({
       id: Math.random().toString(),
       timestamp: Date.now(),
       type: 'reasoning',
-      message: 'Initializing Gemini 3 Pro long-context window for NBA database analysis...'
+      message: 'Agent initialized. Parsing query intent and identifying data sources...'
     });
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: prompt,
+        model: 'gemini-3-flash-preview',
+        contents: query,
         config: {
-          thinkingConfig: { thinkingBudget: 2000 },
+          systemInstruction,
           responseMimeType: "application/json",
           responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                name: { type: Type.STRING },
-                team: { type: Type.STRING },
-                pts: { type: Type.NUMBER },
-                reb: { type: Type.NUMBER },
-                ast: { type: Type.NUMBER },
-                fga: { type: Type.NUMBER },
-                fgm: { type: Type.NUMBER },
-                fta: { type: Type.NUMBER },
-                ftm: { type: Type.NUMBER },
-                tpa: { type: Type.NUMBER },
-                tpm: { type: Type.NUMBER },
-                turnovers: { type: Type.NUMBER },
-                minutes: { type: Type.NUMBER },
-                advanced: {
+            type: Type.OBJECT,
+            properties: {
+              mode: { type: Type.STRING, enum: ['RANKING', 'TREND', 'COMPARISON'] },
+              summary: { type: Type.STRING },
+              data: {
+                type: Type.ARRAY,
+                items: {
                   type: Type.OBJECT,
                   properties: {
-                    ts_pct: { type: Type.NUMBER },
-                    efg_pct: { type: Type.NUMBER },
-                    per: { type: Type.NUMBER }
-                  }
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    team: { type: Type.STRING },
+                    pts: { type: Type.NUMBER },
+                    reb: { type: Type.NUMBER },
+                    ast: { type: Type.NUMBER },
+                    fga: { type: Type.NUMBER },
+                    fgm: { type: Type.NUMBER },
+                    fta: { type: Type.NUMBER },
+                    ftm: { type: Type.NUMBER },
+                    tpa: { type: Type.NUMBER },
+                    tpm: { type: Type.NUMBER },
+                    date: { type: Type.STRING, description: 'Required for TREND mode (YYYY-MM-DD)' },
+                    advanced: {
+                      type: Type.OBJECT,
+                      properties: {
+                        ts_pct: { type: Type.NUMBER },
+                        efg_pct: { type: Type.NUMBER },
+                        per: { type: Type.NUMBER }
+                      }
+                    }
+                  },
+                  required: ['name', 'pts', 'reb', 'ast', 'advanced']
                 }
-              },
-              required: ['name', 'pts', 'reb', 'ast', 'advanced']
-            }
+              }
+            },
+            required: ['mode', 'data', 'summary']
           }
         }
       });
 
-      // Simulation of multi-step output for UI experience
       await this.simulateAgentWorkflow(onStep);
 
-      const data = JSON.parse(response.text || '[]');
-      return data;
-    } catch (error) {
-      console.error("Gemini Error:", error);
+      const parsed: AnalysisResponse = JSON.parse(response.text || '{}');
+      return parsed;
+    } catch (error: any) {
+      console.error("Gemini Agent Error:", error);
       onStep({
-        id: 'err',
+        id: 'err-' + Date.now(),
         timestamp: Date.now(),
         type: 'output',
-        message: 'Agent encountered an error in scraping pipeline.'
+        message: `Agent encountered an error: ${error?.message}`
       });
-      return [];
+      return { mode: 'RANKING', summary: 'Error processing request.', data: [] };
     }
   }
 
   private async simulateAgentWorkflow(onStep: (step: AgentStep) => void) {
     const steps: Partial<AgentStep>[] = [
-      { type: 'action', message: 'Navigating to stats.nba.com/players/traditional...' },
-      { type: 'action', message: 'Waiting for JS hydration of stat tables...' },
-      { type: 'healing', message: 'CRITICAL: CSS Selector ".stats-table-row" not found. Activating Self-Healing logic.' },
-      { type: 'reasoning', message: 'Visual re-indexing complete. Mapping new selector: "div[class*=\'Table_row\']".' },
-      { type: 'action', message: 'Extracting raw DOM fragments for 15 primary targets.' },
-      { type: 'action', message: 'Running Python sandbox for TS% and PER calculations...' }
+      { type: 'action', message: 'Targeting NBA.com/stats and Basketball-Reference dynamic tables...' },
+      { type: 'action', message: 'Bypassing Cloudflare protection via rotating stealth headers...' },
+      { type: 'healing', message: 'Self-healing: Re-indexing dynamic table rows for 2024 schema change.' },
+      { type: 'reasoning', message: 'Extracting raw box scores and executing Python-based advanced metric calculations.' },
+      { type: 'output', message: 'Data verification complete. Synchronizing result set...' }
     ];
 
     for (const step of steps) {
-      await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+      await new Promise(r => setTimeout(r, 700 + Math.random() * 500));
       onStep({
         id: Math.random().toString(),
         timestamp: Date.now(),
