@@ -5,7 +5,7 @@ export enum AgentStatus {
   ERROR = 'ERROR'
 }
 
-export type AnalysisMode = 'RANKING' | 'TREND' | 'COMPARISON';
+export type AnalysisMode = 'RANKING' | 'TREND' | 'COMPARISON' | 'PREDICTION';
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -16,8 +16,14 @@ export interface ChatMessage {
 export interface AgentStep {
   id: string;
   timestamp: number;
-  type: 'reasoning' | 'action' | 'healing' | 'output';
+  type: 'reasoning' | 'action' | 'healing' | 'output' | 'code';
   message: string;
+  code?: string;
+}
+
+export interface GroundingSource {
+  title: string;
+  uri: string;
 }
 
 export interface PlayerStats {
@@ -28,6 +34,7 @@ export interface PlayerStats {
   reb: number;
   ast: number;
   date?: string;
+  prediction?: number; // For win probabilities or projected scores
   advanced?: {
     ts_pct: number;
     efg_pct: number;
@@ -42,4 +49,6 @@ export interface AnalysisResponse {
   metrics: string[];
   timeRange: string;
   data: PlayerStats[];
+  sources?: GroundingSource[];
+  pythonLog?: string;
 }
